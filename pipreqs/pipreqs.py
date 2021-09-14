@@ -19,10 +19,12 @@ Options:
                           $ export HTTP_PROXY="http://10.10.1.10:3128"
                           $ export HTTPS_PROXY="https://10.10.1.10:1080"
     --debug               Print debug information
+    --with-non-pip        List packages not found on pip too
     --ignore <dirs>...    Ignore extra directories, each separated by a comma
     --no-follow-links     Do not follow symbolic links in the project
     --encoding <charset>  Use encoding parameter for file open
     --savepath <file>     Save the list of requirements in the given file
+    --nonpippath <file>   Save the list of non-pip imports in the given file
     --print               Output the list of requirements in the standard
                           output
     --force               Overwrite existing requirements.txt
@@ -123,7 +125,7 @@ def get_all_imports(
                         raw_imports.add(node.module)
             except Exception as exc:
                 if ignore_errors:
-                    traceback.print_exc(exc)
+                    # traceback.print_exc(exc)
                     logging.warn("Failed on file: %s" % file_name)
                     continue
                 else:
@@ -170,10 +172,12 @@ def generate_unknown_file(path, unknown):
         logging.debug('Writing {num} unknown imports: {imports} to {file}'.format(
             num=len(unknown),
             file=path,
-            imports=", ".join([x for x in unknown])
+            imports=", ".join([x['name'] for x in unknown])
         ))
         fmt = '{name}'
-        out_file.write('\n'.join(unknown))
+        out_file.write('\n'.join(
+            fmt.format(**item) if item['version'] else '{name}'.format(**item)
+            for item in unknown) + '\n')
 
 def output_requirements(imports, symbol):
     generate_requirements_file('-', imports, symbol)
@@ -199,7 +203,7 @@ def get_imports_info(
         except HTTPError:
             logging.debug(
                 'Package %s does not exist or network problems', item)
-            unknown.append(item)
+            unknown.append({'name':item, 'version':''})
             continue
         result.append({'name': item, 'version': data.latest_release_id})
     return result, unknown
@@ -450,17 +454,16 @@ def init(args):
         # imports,_ = local + get_imports_info(difference,
         #                                    proxy=proxy,
         #                                    pypi_server=pypi_server)
-        print(pypi_server)
-        print(proxy)
+
         imports, unknown = get_imports_info(candidates,
                                            proxy=proxy,
                                            pypi_server=pypi_server)
     # sort imports based on lowercase name of package, similar to `pip freeze`.
     imports = sorted(imports, key=lambda x: x['name'].lower())
-
+    # import pdb; pdb.set_trace()
     path = (args["--savepath"] if args["--savepath"] else
             os.path.join(input_path, "requirements.txt"))
-    path_unknown = (args["--savepath"] if args["--savepath"] else
+    path_unknown = (args["--nonpippath"] if args["--nonpippath"] else
             os.path.join(input_path, "unknown_packages.txt"))
 
     if args["--diff"]:
@@ -489,8 +492,9 @@ def init(args):
     else:
         symbol = "=="
 
-    print(unknown)
-    print(imports)
+    if args["--with-non-pip"]:
+        imports += unknown
+    # import pdb; pdb.set_trace()
 
     if args["--print"]:
         output_requirements(imports, symbol)
