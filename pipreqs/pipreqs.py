@@ -48,7 +48,7 @@ import requests
 from yarg import json2package
 from yarg.exceptions import HTTPError
 
-from pipreqs import __version__
+# from pipreqs import __version__
 
 REGEXP = [
     re.compile(r'^import (.+)$'),
@@ -92,7 +92,7 @@ def get_all_imports(
     imports = set()
     raw_imports = set()
     candidates = []
-    ignore_errors = False
+    ignore_errors = True
     ignore_dirs = [".hg", ".svn", ".git", ".tox", "__pycache__", "env", "venv"]
 
     if extra_ignore_dirs:
@@ -111,7 +111,7 @@ def get_all_imports(
         candidates += [os.path.splitext(fn)[0] for fn in files]
         for file_name in files:
             file_name = os.path.join(root, file_name)
-            with open(file_name, "r", encoding=encoding) as f:
+            with open(file_name, "r") as f:
                 contents = f.read()
             try:
                 tree = ast.parse(contents)
@@ -165,6 +165,15 @@ def generate_requirements_file(path, imports, symbol):
             fmt.format(**item) if item['version'] else '{name}'.format(**item)
             for item in imports) + '\n')
 
+def generate_unknown_file(path, unknown):
+    with _open(path, "w") as out_file:
+        logging.debug('Writing {num} unknown imports: {imports} to {file}'.format(
+            num=len(unknown),
+            file=path,
+            imports=", ".join([x for x in unknown])
+        ))
+        fmt = '{name}'
+        out_file.write('\n'.join(unknown))
 
 def output_requirements(imports, symbol):
     generate_requirements_file('-', imports, symbol)
@@ -173,6 +182,7 @@ def output_requirements(imports, symbol):
 def get_imports_info(
         imports, pypi_server="https://pypi.python.org/pypi/", proxy=None):
     result = []
+    unknown = []
 
     for item in imports:
         try:
@@ -189,9 +199,10 @@ def get_imports_info(
         except HTTPError:
             logging.debug(
                 'Package %s does not exist or network problems', item)
+            unknown.append(item)
             continue
         result.append({'name': item, 'version': data.latest_release_id})
-    return result
+    return result, unknown
 
 
 def get_locally_installed_packages(encoding=None):
@@ -432,11 +443,16 @@ def init(args):
         imports = get_import_local(candidates, encoding=encoding)
     else:
         logging.debug("Getting packages information from Local/PyPI")
-        local = get_import_local(candidates, encoding=encoding)
+        # local = get_import_local(candidates, encoding=encoding)
         # Get packages that were not found locally
-        difference = [x for x in candidates
-                      if x.lower() not in [z['name'].lower() for z in local]]
-        imports = local + get_imports_info(difference,
+        # difference = [x for x in candidates
+        #               if x.lower() not in [z['name'].lower() for z in local]]
+        # imports,_ = local + get_imports_info(difference,
+        #                                    proxy=proxy,
+        #                                    pypi_server=pypi_server)
+        print(pypi_server)
+        print(proxy)
+        imports, unknown = get_imports_info(candidates,
                                            proxy=proxy,
                                            pypi_server=pypi_server)
     # sort imports based on lowercase name of package, similar to `pip freeze`.
@@ -444,6 +460,8 @@ def init(args):
 
     path = (args["--savepath"] if args["--savepath"] else
             os.path.join(input_path, "requirements.txt"))
+    path_unknown = (args["--savepath"] if args["--savepath"] else
+            os.path.join(input_path, "unknown_packages.txt"))
 
     if args["--diff"]:
         diff(args["--diff"], imports)
@@ -471,14 +489,18 @@ def init(args):
     else:
         symbol = "=="
 
+    print(unknown)
+    print(imports)
+
     if args["--print"]:
         output_requirements(imports, symbol)
         logging.info("Successfully output requirements")
     else:
         generate_requirements_file(path, imports, symbol)
+        generate_unknown_file(path_unknown, unknown)
         logging.info("Successfully saved requirements file in " + path)
 
-
+__version__ = 1
 def main():  # pragma: no cover
     args = docopt(__doc__, version=__version__)
     log_level = logging.DEBUG if args['--debug'] else logging.INFO
